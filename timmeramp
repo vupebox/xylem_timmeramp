@@ -1,0 +1,170 @@
+/********************************************Motor control*************************************
+ *                                                                                            *
+ *  Name: Motor Control                                                                       *
+ *  By: Josue Ximello Rios                                                                    *
+ *  Date: 16/02/2019                                                                          *
+ *  Description: Programa para controlar el funcionamiento de un motor electrico.             *
+ *               El procedimiento normal es el siguiente:                                     *
+ *                                                                                            *
+ *               A.- El motor se activa                                                       *
+ *               B.- Con un rodillo comienza a jalar un mangera                               *
+ *               C.- Un encoder comienza a leer la distancia de la mangera que a sido         *
+ *                   jalada por el motor.                                                     *
+ *               D.- Cuando llega a una lectura preprogramada:                                *
+ *                    D1.- El motor se detiene                                                *
+ *                    D2.- Unas navajas cortan la mangera y la deja caer                      *
+ *                                                                                            *
+ *                Se defines las siguientes funciones del programa                            *
+ *                                                                                            *
+ *                1.- Lectura de un sensor magnetico "D-M9P" que detecta el estado del piston *
+ *                    que controla la canaleta.                                               *
+ *                                                                                            *
+ *                    - Cuando se abre la canaleta comienza a contar un tiempo. Si se cierra  *
+ *                      antes de que el tiempo se agoté siguie con el proceso normal.         *
+ *                    - Si se acaba el tiemmpo de sensado y mientras el sensor detecte que la *
+ *                      canaleta esté abierta ir a la función para detener el sistema.        *
+ *                    - Hasta que la canaleta se desatasca y el sensor magnetico detecta la   *
+ *                      la posicion correcta ir a la función para retomar el sistema.         *
+ *                                                                                            *
+ *                2.- Lectura de sensor de corriente no invasivo "SCT013" para detectar los   * 
+ *                    niveles de corriente del motor.                                         *
+ *                                                                                            *
+ *                    - Si el sensor detecta un consumo de corriente mayor a 6 Amperios       *
+ *                      ir a la función para detener el programa.                             *
+ *                    - Hasta que precionen un boton de inicio vuelve a iniciar el proceso    *
+ *                      normal.                                                               *
+ *                                                                                            *
+ *                3.- Funcion para detener el sistema                                         *
+ *                                                                                            *
+ *                      *En caso de ser llamada esta función                                  *
+ *                                                                                            *
+ *                    - Prendemos relevador 1 que activa luces de emergencia                  *
+ *                    - Prendemos relevador 2 que abre circuito de alimentación del motor     *
+ *                                                                                            *
+ *                4.- Función para iniciar el proceso de nuevo.                               *
+ *                                                                                            *
+ *                      *Este sistema solo se puede llamar despues de haber detenido el       *
+ *                       proceso normal o haber llamado a la función de detener sistema       *
+ *                                                                                            *
+ *                    - Apagamos relevador 1 que desactiva luces de emergencia                *
+ *                    - Apagamos relevador 2 que cierra circuito del motor                    *
+ *                                                                                            *
+ *********************************************************************************************/
+
+
+//Variables definidas
+
+
+#define DM9P      13      //Constante que espesifica el pin para leer el estado del sensor DM9P
+#define SCT       A0      //Constante que especifica el pin para leer el valor del sensor SCT013
+#define RLux      12      //Constante que especifica el pin para cotrolar el relevador de luces
+#define RMotor    11      //Constante que especifica el pin para controlar el relevador para motor
+#define btnStart  10      //Constante que especifica el pin para leer el estado del boton
+                          //fisico externo para reanudar el proceso
+#define LitimeP   6000    //Constante que espesifica el tiempo limite al cual el piston deve
+                          //llegar a su estado normal
+#define LimitAm   3.9000  //Constante que especifica el limite de consumo de amperaje que
+                          //puede alcanzar el motor
+#define Stop      false   //Constante que espesifica el valor para detener el programa al
+                          //llamar a la funcion "realyControl"
+#define Start     true    //Constante que especifica el valor para iniciar o continuar el 
+                          //programa al llamar a la funcion "relayControl" 
+//Declaración de variables
+
+int Tpiston = 0;         //especifica el timepo que dura el piston en llegar a su estado normal
+double SCTvalue = 0;
+
+
+void setup() {
+
+  Serial.begin(9600);     //Funcsion serial para desplegar valores por consola para los logs
+  analogReference(INTERNAL);
+  pinMode(DM9P, INPUT);
+  pinMode(RLux,OUTPUT);
+  pinMode(RMotor,OUTPUT);
+  pinMode(btnStart,INPUT);
+
+  relayControl(Start);
+}
+
+
+void loop() {
+
+  ReadDM9P();
+  Serial.println("SCT: " + String(readSCT()));
+  controlSCT(); 
+}
+
+
+void controlSCT(){
+
+    SCTvalue = readSCT();
+
+   if(SCTvalue > LimitAm){
+      Serial.println("Limite de amperaje alcanzado");
+      relayControl(Stop);
+      while(!digitalRead(btnStart)){true;}
+      relayControl(Start);
+      delay(500);
+      Serial.println("Procedimiento normal SCT");
+    }
+}
+
+//This function read the DM9P sensor and detects if the actuaror is in correct position
+void ReadDM9P(){
+
+  if(!digitalRead(DM9P)){
+
+      Tpiston = 0;  
+      Serial.println("Canaleta abierta");
+
+      while(true){
+          delay(1);
+          Tpiston++;
+
+          if(digitalRead(DM9P) && (Tpiston < LitimeP)){
+              Serial.println("Continuar con el proceso normal");
+              delay(1500);
+              break;
+            }
+            
+            if(!digitalRead(DM9P) && (Tpiston >= LitimeP)){
+              Serial.println("Proceso detenido");
+              relayControl(Stop);
+              while(!digitalRead(DM9P)){ delay(1000);}
+              delay(2000);
+              relayControl(Start);
+              Serial.print("Retomar el proceso normal");
+              delay(1500);
+              break;
+            }
+       }
+         
+    }
+}
+
+
+
+void relayControl(bool Control){
+
+    //This part of tha function turn on the emergency lights and stop the motor
+    if(Control == Stop){
+        digitalWrite(RLux,LOW);
+        digitalWrite(RMotor,LOW);
+      }
+
+     //This part of tha function turn off the emergency lights and start the motor
+     if(Control == Start){
+        digitalWrite(RLux,HIGH);
+        digitalWrite(RMotor,HIGH);
+      }
+}
+
+double readSCT(){
+
+  double val = 0;
+
+  val = (analogRead(SCT) * (1.1/1023.00)) * 50.00;
+
+  return val;
+}
